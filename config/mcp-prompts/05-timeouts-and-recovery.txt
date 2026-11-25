@@ -1,0 +1,75 @@
+书序 MCP 宿主指令 05｜回执、错误与恢复
+
+所有回复先读取实际结构化结果：顶层 `status`，再看 `data`、`error`、`envelope`。MCP 文本内容只是同一 JSON 的兼容副本；不要仅凭自然语言、HTTP 200、工具已调用或宿主界面的“成功”推断业务已提交。
+
+## 状态处理
+
+| 返回状态/错误 | 处理方式 |
+| --- | --- |
+| `ok` 且 `envelope.receipt.committed=true` | 写入已提交；回报实际对象 ID、版本和下一步查回方式。 |
+| `ok` 但没有提交回执 | 按真实结果说明查询/预览/受理状态；不称为已写入。 |
+| `needs_clarification` | 用 `error.details.question` 和候选，只询问完成这一步所缺的一项用户选择。 |
+| `no_candidate` | 解释实际过滤条件和候选数量；只呈现服务实际返回的放宽试算。用户选择前不放宽重试。 |
+| `invalid_params` | 读取 `error.details` 和当前 `inputSchema`；能从已知事实修正时按 schema 修正，涉及用户意思时追问，不猜 enum 或 ID。 |
+| `version_conflict` | 停止提交，重新读取当前记录和版本，说明变化；不能用旧版本覆盖新值。 |
+| `forbidden` / `consent_required` | 不绕过权限。按错误要求等待具名授权或本机操作员的精确许可；参数、对象或消息标识必须与原请求一致。普通具名宿主不得通过别的工具或 host 读取完整资料。 |
+| `submission_unknown` 或写入超时 | 不宣称成功或失败；使用原 `request_id` 调 `get_request_status`，必要时调 `get_request_diagnostics`。若工具允许重试，保持原参数和 request ID。 |
+| `service_unavailable` | 说明当前未取得可靠服务结果。只有错误中明确 `dispatched=false` 才能据此说明请求未派发；否则按真实状态查回。 |
+| `not_found` | 核对目标是否在当前宿主授权/范围内及 ID 是否正确；不从其它宿主或正式书库寻找替代对象。 |
+
+## 1.4.0 本批附加错误
+
+| 错误码 | 含义与处理 |
+| --- | --- |
+| `cursor_forbidden` | 分页引用属于其他 host、profile、授权修订或 scope。丢弃引用，按当前身份重做原查询。 |
+| `cursor_invalid` | 游标签名、内容或筛选范围校验失败。丢弃引用，从原筛选重读。 |
+| `cursor_expired` | 档案页游标已过期（15 分钟）。从原查询开始，不拼接新快照。 |
+| `cursor_stale` | 读取快照的安全修订发生变化。丢弃现有页面并从原筛选重新开始。 |
+| `idempotency_conflict` | 导出 request ID 已绑定不同参数。先查原编号；只有用户仍要求不同范围的新导出时才分配新编号。 |
+| `expired` | 导出引用一小时有效期已过。若用户仍要导出，使用新 request ID 重新生成。 |
+| `authorization_changed` | host 授权修订已变化。重新握手、读取当前目录并重建待续接状态。 |
+| `already_undone` | 原更正/写入已撤销。读取当前状态后向用户说明，不再次反转。 |
+| `privacy_rejected` | 保存内容包含咨询/反思范围内的可识别信息。写入被拒绝；不要用近义改写绕过。只有来源端去标识后重新获得用户指令才可重试。 |
+| `privacy_scope_required` | 内容含可识别信息，但方向、主题或关联题不能确定用途。details 只列类别，不含原文；先确认明确的非咨询范围，或请用户在来源端去标识后再提交。 |
+
+## 批次 II 的状态与历史处理
+
+- `get_session_conditions`、题族关系和问法偏好写入的 `version_conflict`：先用对应的 get 工具重新读取当前版本和值，再判断本轮用户意图是否仍适用；不能自动覆盖。`set_question_preference(scope="recent")` 缺少 `expires_at` 或传过去时间为 `invalid_params`；长期 `baseline` 带 `expires_at` 也无效。
+- `pick_unfinished_prompt` 的 `no_candidate`：按 `candidate_count`、`eligible_before_recent_count`、`recently_excluded_count`、`new_prompt_count`、`future_snoozed_count` 和 `effective_conditions` 说明为何没有可续题。只有近期避重导致空池时才可依错误里的 `next_call` 让用户选择是否忽略；不能用普通新题替代，不能自动缩短条件。只读 `list_unfinished_prompts` 返回空 `items` 是 `ok`，不是 `no_candidate`。
+- `list_unfinished_prompts` 分页不写 recommendation history；重复 `pick_unfinished_prompt` 会记录新 decision，不得用它翻页。分页采用 `offset/next_offset`，没有跨页快照令牌；如果题目状态或活动改变，从 offset 0 重读。
+- `set_prompt_family_relation` 的 `version_conflict` 按 `next_call` 重新读取 `get_prompt_family`；已有 `parent_id` 收窄关系而又要求拆开时会 `needs_clarification`，不能覆盖父子关系。
+- `get_guide_history` 的 `history_scope="all_hosts"` 要求 full access；历史只含已存问题、focus 和时间，不含用户回答。追问 `focus` 暂存/保存若触发 `privacy_scope_required` 或 `privacy_rejected`，停止并遵从隐私边界。
+- `get_prompt_timeline` / `review_prompt_events` 的 `coverage` 可能标出旧历史缺口；只有账本启用后产生的事件可追溯。缺少事件不是未发生的证明。事件 `reason=null` 表示没有真实保存的理由，宿主不能补猜。
+- `write_claim_evidence` 成功中的 `verification:"recorded_scope_not_independent_fact_check"` 表示按用户给出的范围记录证据，并非独立核实了说法。
+- `get_topic_project_progress` 要求 `full_access`；返回 `forbidden` 后只说明权限限制，不能用一串窄读工具拼出完整专题。普通具名宿主读取私密题、素材字段时可能返回 `not_found` 或 `forbidden`；不能据此向用户泄露受限对象是否存在。
+
+`correct_prompt_status` 成功还要求检查 `data.correction_receipt.committed=true`，并按 `data.next_call` 查回 `get_prompt`；`version_conflict` 以实际当前记录和 `get_prompt` 参数为准。检查点写入版本冲突时按 `prompt_id`、`expected_version`、`actual_version` 重新读取命题，再核对用户要保存的内容。`continue_thought` 返回多个检查点时用 `candidate_count/candidates/has_more` 询问用户；只有一个候选也不能跨 host 复用保存 ID。
+
+`continue_pending_call` 暂存 `save_thought_checkpoint` 参数时也会检查 `cue`、`unanswered_question`、`progress`。尚未给 `prompt_id` 的部分文本只在非识别内容时可继续暂存；扫描到标识符且无法确定非咨询范围时返回 `privacy_scope_required`，回执不含原文。填入 `prompt_id` 后仍会按当前题目范围检查；真正保存时再检查一次。不要把暂存成功理解成检查点已保存。
+
+错误码完整清单、结构化字段和具体工具限制见宿主指南。未列出的错误按实际 `error.code`、`message` 和 `details` 汇报，不自行归类为成功。
+
+## 批次 III：验收、目录兼容与重启
+
+- 本地 `mcp25_host_acceptance` CLI 的退出码 0 且报告 `status="passed"` 才表示该次隔离运行通过；exit 1 是验收步骤失败，exit 2 是参数/输出/runner 异常。还必须确认 `cleanup.service_stopped=true` 和 `cleanup.workspace_removed=true`。该 CLI 不是 MCP 工具，也不证明 CuteDuck/QQ 已连通。
+- `compare_mcp_directories` 的 `invalid_baseline` 表示基线结构、`name/inputSchema` 或工具名唯一性不成立；`baseline_incomplete` 表示页被截断、offset 不是 0 或 `tools/count/capabilities` 不一致。重取同一目录版本的完整快照，不混合不同分页轮次。`permission_delta.comparable=false` 时权限变化未知，不能由 schema 兼容推断权限仍在。
+- `restart_service` / `retry_service_restart` 返回 `data.status="accepted"` 只代表操作已持久受理。继续用原 `operation_id` 调 `get_service_restart`，检查 `data.status` 与 `active_work`。查询成功但 data 内 `status="failed"` 是可查回的失败，不是重启完成；记录嵌套 `error.code/message`、`retryable` 与活动项。
+- `drain_timeout` 表示排空期限内仍有调用、写入或作业，服务 scheduler 恢复接收请求。`helper_start_failed`、`old_instance_exit_timeout`、`restart_verification_failed` 和 `request_receipt_missing` 表示重启流程未满足完成条件。仅当该操作 `retryable=true` 且用户仍要求重启时，使用同一个 `operation_id`、新 `request_id` 调 `retry_service_restart`；保持该 operation ID 查询直到 `completed` 或新的明确失败。
+- `invalid_state` 表示该 operation 当前不能 retry；`operation_id_conflict` 表示 ID 已用于其它维护请求；`maintenance_in_progress` 表示另一个操作正在占用排空门；`not_found` 表示当前 actor 看不到该操作；`restart_unavailable` 表示服务没有可核验的本机实例上下文。不要换 ID 绕过状态错误，也不要把接受回执解释为健康重启。
+- 仅当 `data.status="completed"` 且 `completion_receipt.business_receipt_persisted/health_verified/handshake_verified` 全真、新旧实例 ID 不同、服务版本匹配，才能报告重启成功。其它状态继续查回或如实报告失败。
+
+## 请求查回与幂等
+
+业务写入始终使用稳定 request ID。结果不明时先查该 ID 的状态与脱敏诊断，再决定下一步。若服务说请求仍未决，不创建新编号；若允许重试则完全复用原参数。不要将 diagnostics 中的阶段耗时解释成业务成功凭据。
+
+## 游标和分块
+
+分页游标只可用于生成它的同一查询、宿主和授权修订。`cursor_stale`、`cursor_expired` 或 `cursor_forbidden` 时丢弃旧游标，从原查询重新开始；不拼接或猜测下一页。附件/导出分块按服务给出的偏移、大小和 SHA-256 校验，缺块时不能称为完整文件。
+
+## 异步作业
+
+保存 submit 返回的原 job ID，使用实际 job 状态查询。`cancel` 返回受理不代表任务已取消；`resume` 仅按用户指令恢复明确中断的同一任务。对处于提交阶段的任务按实际的不可取消错误处理，不提交替代任务。作业输出的部分结果不能描述为全量完成。
+
+## 报告给用户
+
+用一两句话交代已确定事实、未知状态和下一步可用工具。不要贴 bearer、会话密钥、诊断日志正文或不相关私聊内容。完整错误码及行为以本服务当前版本注册和实现为准。

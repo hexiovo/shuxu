@@ -1,0 +1,57 @@
+给 CuteDuck｜接入我的书序 MCP
+
+请把书序接到负责我 QQ 私聊的 CuteDuck 实例。书序装在 Windows 的 F:\桌面\程序\shuxu，由 CuteDuck 以标准 stdio MCP 启动。先按第 1、2 部分接通隔离库。我明确说“接正式书库”后，按第 3 部分使用日常书库。
+
+第 1 部分｜注册隔离项
+
+先确认负责 QQ 私聊的 MCP 宿主运行在这台 Windows 电脑上，能访问下面的脚本，并支持通过 command、args、env 启动 stdio 子进程。请按你实际支持的配置格式添加等价项。若需要我手动注册，告诉我实际入口和应填的内容。若宿主在另一台机器、云端或访问不到 F: 盘，请告诉我它的运行位置与支持的 MCP 传输方式，等我决定部署方式。
+
+在已有配置里只新增以下服务器项，保留其他服务器。执行前确认端口 17833 可用、数据目录和运行目录都未被使用。重复验收时使用新的唯一目录后缀。
+
+```json
+{
+  "mcpServers": {
+    "shuxu-cuteduck-test": {
+      "command": "py",
+      "args": ["-3.12", "-X", "utf8", "-B", "F:\\桌面\\程序\\shuxu\\shuxu\\mcp_server.py"],
+      "env": {
+        "SHUXU_PORT": "17833",
+        "SHUXU_DATA_DIR": "F:\\桌面\\程序\\shuxu\\.acceptance\\cuteduck-first-connect\\data",
+        "SHUXU_RUNTIME_DIR": "F:\\桌面\\程序\\shuxu\\.acceptance\\cuteduck-first-connect\\runtime"
+      }
+    }
+  }
+}
+```
+
+宿主需能执行 `py -3.12`，对应 Python 环境需能导入 `mcp`。stdio 入口会按需启动 127.0.0.1 上的书序服务。这里使用本机启动参数，无需浏览器、Gateway 或 bearer。
+
+第 2 部分｜用实际 MCP 连接检查
+
+从负责我 QQ 私聊的 CuteDuck 实例刷新刚添加的服务器，并用该连接完成以下调用。
+
+1. 完成 MCP `initialize`，记录 `serverInfo.version`。读取 `tools/list` 的实际工具目录和 `inputSchema`。
+2. 调用 `get_mcp_directory({"limit":100,"offset":0})`。若 `data.complete=false`，用 `data.next_offset` 继续。当前书序预期服务和目录版本均为 `1.4.0`，共 120 个工具，`data.identity.host_id="legacy-stdio"`、`data.identity.profile="legacy_stdio"`、`data.full_access=true`。核对目录总数与 `tools/list` 是否一致。
+3. 调用 `diagnose_mcp_compatibility({"expected_protocol_version":1,"expected_service_version":"1.4.0"})`，确认 `data.compatible=true`，记录 `data.instance_id`。这里的 `1` 是书序内部协议版本。
+4. 调用 `run_mcp_self_check({})`，确认 `data.passed=true`、每项 `data.checks[].ok=true`、`data.synthetic_only=true` 和 `data.writes_performed=false`。
+
+回复我实际使用的服务器名、服务及目录版本、工具数、实例 ID 和自检结果。版本或目录有差异，或出现启动、权限、端口等错误时，告诉我实际值和失败阶段。QQ 私聊是否真的能调用，等我在指定私聊发出指令后，根据该轮的真实调用回执确认。需要在隔离库走完整的取题、追问、标记和查回流程时，按同目录的 `02-acceptance-chat.txt` 操作，以本文件第 1 部分注册的隔离路径为准，并将会话和请求编号换成这次运行的唯一值。
+
+第 3 部分｜收到“接正式书库”后执行
+
+正式库的本机 stdio 有完整工具权限。先确认可以将该服务器限定在我指定的私聊，再用下面的配置添加 `shuxu`。它复用现有日常书库 `I:\data\shuxu\data\shuxu.sqlite3` 和本机端口 17831。在新连接上重复第 2 部分的只读检查，后续日常请求只路由到正式项。根据我的当前请求读取资料或修改记录。
+
+```json
+{
+  "mcpServers": {
+    "shuxu": {
+      "command": "py",
+      "args": ["-3.12", "-X", "utf8", "-B", "F:\\桌面\\程序\\shuxu\\shuxu\\mcp_server.py"]
+    }
+  }
+}
+```
+
+日常调用时，遵循书序在 `initialize` 返回的宿主指令，并使用当前连接的 `inputSchema`。如果你的客户端没有把握手指令交给 AI，可按顺序加载 `F:\桌面\程序\shuxu\config\mcp-prompts` 下的六份 TXT。
+
+“给我一题”用 `next_prompt`，“这题我卡住了，问我一个问题”用 `guide_thought`，“把刚才这题标为写过”用 `set_prompt_state`，“查回刚才那题的状态”用 `get_prompt`。同一私聊保持稳定的 `conversation_id`，沿用工具返回的 `prompt_id` 和当前版本。每个独立写操作使用唯一的 `request_id`；遇到超时或 `submission_unknown`，先用原 `request_id` 调 `get_request_status` 查回。用真实提交回执确认写入后再回复“已保存”。

@@ -1,0 +1,77 @@
+书序 MCP 宿主指令 03｜资料、全文、来源与附件
+
+只读取用户本轮任务涉及的资料。先用当前宿主目录中的检索或精确 ID 查询定位对象，再按当前工具 schema 和用户选定范围读取。检索命中、摘要和上下文概览不等于已取得全部正文。
+
+## 完整性与续页
+
+用户要求“全部、全文、完整专题、整段时间线”时：
+1. 先确认查询范围和业务总量；记录快照/版本、排序和页大小。
+2. 逐页或逐段使用服务返回的实际 cursor/续页参数，不自行构造 cursor，不改变筛选条件。
+3. 直到返回 `complete=true` 或服务明确说明无法继续；最后汇报总数、已读条数、范围、快照和未取得原因。
+4. 超出会话容量时按接口支持的导出或分段机制交付；每段记录实际偏移、长度和校验值。
+
+若没有精确总数，说明“当前服务无法精确计数”，不以已显示条数冒充总量。游标失效时按原查询重新开始，不猜下一页。
+
+## 批次 I 完整档案工具
+
+只有当前宿主目录实际列出这些工具且权限返回全权限时，才使用完整档案接口；普通具名宿主得到 `forbidden` 时停止。`get_full_record` 必填 `kind` 和精确 `id`；kind 可为 `prompt`、`inspiration`、`clipping`、`resume` 或 `topic`。结果按类型返回实际记录字段、关联资料/题目、来源关系及附件描述，不用摘要替代正文。
+
+`list_full_records` 的所有筛选字段均可选：`kind`（默认 `all`，可按五种记录类别筛选）、`prompt_id`、`direction`、`topic`、`state`（命题的 `want_to_write|in_progress|written`）、`created_from`、`created_to`。日期是带时区的 date-time，结束时间不包含在查询范围内；`created_from` 必须早于 `created_to`。`state` 只筛命题记录；kind 为 `topic` 时，题目 ID、状态和日期过滤不适用。`page_size` 默认 20，范围 1–100。服务返回 `items`、`total`、`record_count`、`current_range:{start,end}`、`page_size`、`complete`、`next_cursor`、`snapshot_version`、`snapshot_revision`、固定升序 `sort:["kind","id"]` 和实际 `filters`。续页请求只传上一页的 `cursor`，不同时传筛选字段；游标绑定宿主、授权修订、查询范围和安全快照。
+
+`cursor_expired`、`cursor_invalid` 或 `cursor_stale` 时，按服务实际错误说明停止续页；不要继续拼旧快照。前两种以及内容变化导致的 stale 都应回到原筛选重新开始，不从新快照接着旧页往下拼。
+
+完整记录的附件清单只提供校验元信息时，使用 `get_attachment_chunk` 按 `id`、字节 `offset`（0 至 2³¹−1）和 `max_bytes`（1–65536）读取已保存原图。每块返回 `content_type`、`size_bytes`、整图 `sha256`、当前 `offset`、`chunk_base64`、`chunk_sha256`、`next_offset` 和 `eof`。按偏移连续重组至 `eof=true`，再核对总字节数和整图 SHA-256；缺块或不匹配时不能说附件完整。该工具的 `id` 必须是图像材料 ID；无图或 ID 不是图片记录会返回 `not_found`，offset 超出图像大小返回 `invalid_params` 和实际大小。
+
+用户要求整库或范围导出时使用 `export_full_library`。必填稳定 `request_id`；可用 `kind`（默认 `all`）、`prompt_id`、`direction`、`topic`、`created_from`、`created_to` 缩小范围，格式固定 JSONL，无需也不得臆造 `format` 参数。成功回执给 `export_id`、`record_count`、`attachment_count`、字节数、SHA-256、到期时间、`complete=true`、`committed=true` 和 `download` 分块入口。JSONL 含完整记录和原图 base64，并包含清单、方向和偏好版本/理由及已保存的关联记录。使用 `get_full_export_info` 核对格式、大小、SHA、记录/附件数和有效期，再按 `read_full_export_chunk` 返回的偏移连续读取，末段以 `eof=true` 确认完成；每块上限 64 KiB。导出引用绑定当前具名宿主和授权修订，当前合同有效一小时，不返回或泄露本机文件路径。相同 request ID 只能重试完全相同的筛选；换范围会 `idempotency_conflict`。引用过期用新 request ID 重新导出。
+
+按用户话语选择精确入口：
+
+- “把这条灵感完整内容给我” → `get_full_record`，传 `{"kind":"inspiration","id":"<已定位材料ID>"}`。成功 `data` 有完整 `record.content` 和 `attachment` 的媒体类型/字节数/SHA-256/`chunk_tool`；若 `attachment` 不为 null 且用户需要图片，再按实际大小分块。ID 无效为 `not_found`。
+- “列出 2026 年的全部灵感，分批给我” → `list_full_records`，例如 `{"kind":"inspiration","created_from":"2026-01-01T00:00:00Z","created_to":"2027-01-01T00:00:00Z","page_size":50}`。首屏检查 `total`、`current_range`、`snapshot_revision`、`complete`；只在 `complete=false` 时按 `{"cursor":"<原样的next_cursor>"}` 续页，汇总直到完整。`cursor_forbidden`、`cursor_invalid`、`cursor_expired`、`cursor_stale` 时丢弃旧页，从相同筛选重新开始。
+- “把这条灵感里的原图取回来” → 用户指定的 `id`、`offset:0`、`max_bytes:65536` 调 `get_attachment_chunk`；逐段按返回 `next_offset` 索取，校验每段 hash、字节数和最终整图 SHA-256。offset 越过实际图像大小为 `invalid_params`；ID 不是带图的灵感为 `not_found`。
+- “导出这些命题和原图” → 先按用户给定范围调用 `export_full_library`，保存其 `export_id`、计数、SHA-256 和 `expires_at`；用 `get_full_export_info` 查回元信息，再使用 `read_full_export_chunk` 从 offset 0 分段读取。仅在全部段到达 `eof=true` 且整文件 SHA-256 一致时报告导出已完整取得。写入成功须核对 `committed=true`。相同 `request_id`、相同范围可查回幂等结果；不同范围会 `idempotency_conflict`，必须由新的用户明确请求分配新 ID。
+
+## 私密文本和来源
+
+用户点名某条资料、某字段或某个片段时，只在该范围内读取。全权限具名宿主可以读取完整业务内容，但仍按用户任务限定对象；普通具名宿主遵守实际工具与资料 scope。MCP 返回的原话、来源正文、录入备注和宿主推断要分开标注。
+
+来源关联表示存在可查出处，不自动证明说法正确。只有接口确实返回对应原句、字段、页码/段落或附件，才用这些证据解释结论；缺少原文时明说尚未核对。不要把搜索摘要扩写成引用。
+
+## 图片和附件
+
+只处理用户明确指定的附件。依实际工具合同读取、导出或分段传输图片；每个附件记录 MIME 类型、总字节数、SHA-256 和实际片段偏移。读取完成前不要声称图片完整；不要传本机文件路径，也不要扫描同目录的其他文件。若用户需要将聊天图片存入书序，只传当前附件的字节和类型，不读取未点名的聊天内容。
+
+## 关系、专题与关联线索
+
+按用户给出的对象 ID 和关系描述读取或维护关系。关系类型、顺序、说明及目标字段必须符合当前已注册 schema；不根据材料相似度自动保存业务关系。更新后以实际回执和正/反向查回结果说明变化。若对应关系或全文工具不在本宿主目录，按本轮实际权限报告不可用，不编造替代工具。
+
+规格 13–16 的接口已在本批 registry 注册。执行前仍须确认当前宿主 `tools/list` 实际列出相应工具，并以生成附录中的真实 schema 确定参数、回执和查回调用；注册不等于所有具名宿主都获得相同字段范围。
+
+- 多条点名素材拟题：只用用户明确选中的素材和顺序。按用户指定范围取全文、精确片段或链接标题；结果逐条带可核对来源和位置。拟题本身不入库；用户明确要求保存后，才另调真实写入工具。
+- 题目—素材关系：只有用户明确给出两端对象、角色及排序时才写关系。保留实际版本，写入后按关系 ID 和实际分页读取分别核对题目正向与素材反向视图。
+- 说法证据：保存每条说法与明确素材片段的关系，并按合同区分支持、反对、间接和待核对。来源关联不是事实核验；缺少原文或范围时不得补造引文或结论。
+- 专题进度：完整读取成员、引用、题目状态、续接点和证据缺口；每条下一线索应来自已存实体并能按 ID 查回。清单不完整、分页未完或历史有缺口时明确标出，不把摘要当成完整专题。
+
+### 规格 13｜用多条点名素材拟题
+
+当前工具为只读 `draft_prompt_from_materials`。必填 `materials` 与 `relation_type`；至少 2 条、最多 12 条不同素材。每项必填 `kind`、`id`、`selection`，可选 `expected_version`、`field`、`start`、`length`。`kind` 为 `inspiration|clipping|resume`，`selection` 为 `full|excerpt|link_title`；inspiration 可读字段 `text|source|url|note`，clipping 为 `title|url|published_on|source|note`，resume 为 `title|note|question`。excerpt 要给属于该素材的字段、从 0 开始的 start 和 length，link_title 仅适用剪藏。relation_type 为 `comparison|continuation|counterexample`；可选方向、主题、深浅。成功返回草题、逐条材料正文/所选范围/对象版本/来源、查重结果和 `save_parameters` 建议，但不会写入。遇到无权读取字段、版本变化、无正文或片段越界时遵从原始错误，不自动换完整全文或另选资料。保存草题需等用户明确要求，再使用当前 schema 的独立写入调用和新的 request ID。
+
+### 规格 14｜按类型关联题目和素材
+
+`save_prompt_material_relations` 将一组有序关系写入同一事务。必填 `request_id`、`relation_type`、`materials`；目标必须选现有题 `prompt_id+expected_version`，或新题 `prompt:{text,direction,topic?,depth?,parent_id?}`。每条材料必填 `kind,id,expected_version,selection,role,position`，可选 `expected_relation_version,field,start,length,description`。relation_type 为 `comparison|continuation|counterexample|example|context`；role 为 `source|example|counterexample|context|contrast|support|opposition|indirect|unverified`。写成功检查 `committed`、题目新版本、每个关系 ID 和版本，并按 `next_call` 读回。旧来源关系可能在读取结果中标成 `legacy_claim_source`/`unverified`，这是迁移呈现值，不用于新写入。
+
+如需删除，调用 `remove_prompt_material_relation`，传新 `request_id`、`relation_id` 与该关系的当前 `expected_version`；成功检查 `removed=true` 与题目新版本，再按题目端和素材端查询关系。`read_entity_relations` 用 `kind`（`prompt|inspiration|clipping|resume`）和 `object_id` 定向读取，`limit` 默认 20、1–100，`offset` 默认 0；成功返回 `items,total,next_offset`。每项检查方向、两端对象及版本、type、role、位置、说明、选择范围和关系版本。续页保留 kind/object_id，只替换 offset。版本冲突先重新读取，不用旧值覆盖。
+
+### 规格 15｜记录一条说法的证据
+
+用户明确要求后调用 `write_claim_evidence`。必填 `request_id,prompt_id,expected_prompt_version,claims`；每条 claim 必填 `text`，可选已有 `claim_id` 与其 `expected_version`、证据数组。证据项使用用户选定的剪藏 `clipping_id` 和当前 `material_version`，必填 `support_type`（`supports|opposes|indirect|unverified`），可选 evidence ID/版本、剪藏字段、location、excerpt、conclusion。前三类需记录真实位置和原文片段；`unverified` 表示待核对。服务填写 `checked_at`。成功返回 `verification:"recorded_scope_not_independent_fact_check"`、逐条 claim/evidence ID、字段/位置/原文、版本和 `next_call`；只有 `committed=true` 才说明已记录。随后用 `read_prompt_evidence`（`prompt_id` 必填，limit 默认 50、1–100，offset 默认 0）查回 `claims,total,next_offset`。旧版 claim-source 只标为 unverified，不补造证据。
+
+### 规格 16｜读完整专题及下一线索
+
+`get_topic_project_progress` 必填 `project_id`；`limit` 默认 50、1–100，`offset` 默认 0。它只对目录显示 full access 的宿主开放；其它授权返回 `forbidden` 时停止。返回 `project,members,gaps,next_clue,total,next_offset`。按返回 offset 取完所有成员，检查成员顺序、当前题目状态/版本、材料正文、关系、证据、续接点和未答项。`gaps` 和 `next_clue` 是按全专题成员计算；下一线索带 basis 和可继续调用。沿 next call 精确查回实体，确认建议仍指向题目、材料、续接点或待核对说法。专题不存在返回 `not_found`；权限不足不通过其它工具拼接完整资料。
+
+## 导出
+
+导出只包括用户明确选中的对象和片段。核对导出结果的项目数、完整性、分段或校验信息。远端宿主使用接口返回的限时 artifact ID 与分块读取参数；本机路径不是公网下载链接。不要把原始私密字段追加到未获选内容。
+
+本文件约束检索、完整读取、关系、证据和附件范围。详细 inputSchema 以宿主指南生成的当前注册附录为准；具名宿主只能使用其实际 `tools/list` 返回且授权允许的工具与字段。

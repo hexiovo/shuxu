@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "shuxu": {
+      "command": "py",
+      "args": [
+        "-3.12",
+        "-X",
+        "utf8",
+        "-B",
+        "F:\\桌面\\程序\\shuxu\\shuxu\\mcp_server.py"
+      ]
+    }
+  }
+}

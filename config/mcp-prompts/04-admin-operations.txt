@@ -1,0 +1,65 @@
+书序 MCP 宿主指令 04｜更正与管理操作
+
+管理工具有实际写入影响。每次先识别精确目标、当前版本和当前宿主权限；按本轮用户指令执行，不把“查看/分析/预览”当作提交授权。
+
+## 更正原操作
+
+用户要求更正“刚才”动作时，先查询原 request ID 或最近一次可辨认回执。确认回执所属对象、原值和当前版本；若有多条候选，只问能区分目标的一件事。产品规格第 10 项的当前工具为 `correct_prompt_status`，只在它出现在本宿主目录时调用。它要求 `request_id`、`conversation_id`；可按已有证据传 `target_request_id`、`source_conversation_id` 和 `prompt_id` 定位原回执/目标。要设置状态时，`state` 取 `want_to_write`、`in_progress` 或 `written`；要设置/清除暂缓时，`snoozed_until` 传带时区的 `date-time` 或 `null`；可选 `reason` 为 1–240 字符。至少提供 `state` 或 `snoozed_until` 一项。不要传入 schema 中不存在的 `expected_version`，也不要由宿主从旧回执自行覆盖版本；服务会按原回执和当前记录核对。
+
+提交结果必须保留 `original_receipt`、`before` / `after`、`correction_receipt`、`undo_available` 和 `next_call`。按返回的 `get_prompt` 参数查回目标状态；只有真实提交回执明确提交后才报告成功。不声称多个调用构成原子事务。
+
+用户说“把刚才标成写过的那题改成写到一半”时，如果本会话最近一条可更正回执唯一，按本轮生成的稳定 `request_id` 和 `conversation_id` 调用：
+
+```json
+{"request_id":"session-a-correction-01","conversation_id":"session-a","state":"in_progress"}
+```
+
+若最近回执不唯一，先询问用户要更正的 `target_request_id` 或来源会话；用户指定后将它放入 schema 对应字段。不要从自然语言猜题 ID。成功后保留原回执与前后值，用 `next_call` 的 `get_prompt` 参数查回；报告时区分原写入与本次更正回执。缺少状态和暂缓字段返回 `invalid_params`；原回执不存在/未提交/不属来源会话返回 `not_found`；回执改过多题但未传 `prompt_id` 返回 `needs_clarification`；原题已经改变或原操作撤销返回 `version_conflict`，依错误给的当前值及 `get_prompt` 先查回。
+
+遇到版本冲突，停止覆盖；先读取实际当前值，再说明冲突字段与用户原意的差异。只有用户确认新的目标值后才重提。
+
+## 题目—素材关系与证据写入
+
+只有用户明确指定对象、关系和要保存的内容时才写入。批次 II 的 `save_prompt_material_relations` 可创建一条新草题并在同事务保存有序资料关系，也可给现有题增加/更新关系；必须使用当前题目版本、每条素材版本和已有关系版本。成功后检查 `committed=true`、题目新版本和每个关系 ID，再按返回的 `next_call` 及实际 `read_entity_relations` schema 做题目端/素材端查回。移除关系时用 `remove_prompt_material_relation`，传关系 ID 和关系当前版本；查回确认移除，不能把来源材料本身删除。
+
+`write_claim_evidence` 需给题目当前版本、明确说法和来源剪藏当前版本。记录支持、反对、间接或待核对类型；前三种需要真实位置和原文片段。提交结果还必须声明 `verification` 的含义，说明这是记录用户指定的证据范围，不是独立事实核验。随后用 `read_prompt_evidence` 查回每条说法、证据类型、引用范围、核对时间和版本。版本冲突时先按错误给出的读取工具重读；`privacy_rejected` 或 `privacy_scope_required` 时停止，不换词绕过。
+
+专题进度 `get_topic_project_progress` 是读取工具，但只允许目录明确给 full access 的宿主调用；普通宿主收到 `forbidden` 后停止，不通过多次窄读拼接完整专题。读取到 `gaps` 或 `next_clue` 时，按其 `basis` 和 `next_call` 查回目标，报告分页是否取完。
+
+## 批量写入、删除和撤销
+
+多项写入使用工具白名单中定义的动作，逐项按其真实 schema 填参。只引用本会话已绑定的当前题，或先前步骤明确返回的对象 ID。若工具提供 dry-run/preview，先核对目标数量、对象版本、作用范围与可撤销性；按用户确认后使用同一预览标识提交。
+
+撤销时用原 request ID 定位，并以服务当前回执为准。目标被后续操作改变、已超出可撤销范围或事务回滚时，如实报告；不重做一个看似相反的动作冒充撤销。
+
+## 备份与恢复
+
+备份、恢复和导出路径按实际返回值说明。恢复必须先预览目标备份、指纹和影响；取得用户明确确认后，原样传回预览要求的指纹/绑定值。恢复回执确认前，不宣称数据库已替换；超时先按原 request ID 查询。
+
+高影响批量删除或保留清理先读取绑定当前对象版本的预览。只用用户提供的保留天数/类别期限，展示候选与保护原因后等待明确确认。应用时沿用原 plan ID 和 fingerprint；期间对象或授权变化就重新预览。不要自行选择清理期限。
+
+## 异步任务与维护
+
+异步工具只提交当前服务明确列出的允许动作。受理/排队不等于完成；按返回 job ID 查询实际阶段。取消是取消请求，只有最终状态明确取消才报告已取消。进程中断的任务须用户明确要求并通过登记的恢复调用继续，不自动重放。
+
+### 规格 19：保存并比较完整目录快照
+
+升级前可用 `get_mcp_directory` 保存本 host/profile 的完整目录快照；若目录分页，需收齐同一个 `directory_id` 的全部页，并保留首屏身份/能力信息，形成 `offset=0,complete=true` 且 `total_count=tools.length=capabilities.tool_count` 的对象。升级后调用只读 `compare_mcp_directories`，把旧完整 snapshot 原样放入 `baseline`，逐页读取 `changes`，依据 `compatibility_reasons`、`schema_changes`、`migration` 和 `permission_delta` 汇报结果。`compatible=null` 或 `permission.comparable=false` 时权限旧值未知，不可说权限保持不变。它不启动或重启服务；完成比较后仍要单独核对运行实例握手。
+
+不完整/截断基线是 `baseline_incomplete`，结构错误或重复工具是 `invalid_baseline`；重新获取一份完整的单轮目录，不把两轮结果拼接。`forbidden` 按当前 host scope 处理，不能换到另一个 host 读取。
+
+### 规格 20：具名宿主的排空重启
+
+只有用户明确要求立即重启时才提交。先确认 `restart_service` 在本 host 的工具目录中且有工具调用权限。调用使用唯一新 `request_id` 和 `operation_id`，可选 `timeout_seconds` 默认 120 秒、范围 1–3600。首个返回只表示持久受理：`data={operation_id,status:"accepted",attempt,request_id,query_tool:"get_service_restart",retry_with_same_operation_id:true}`。不得把顶层 `status:"ok"`、请求回执或 `data.status:"accepted"` 说成服务重启完成。
+
+立即按原 `operation_id` 调 `get_service_restart`，读持久状态 `accepted,draining,stopping,starting,verifying,completed,failed`、当前 `attempt`、`request_id`、旧/新实例、`active_work:{active_dispatches,active_writes,active_actions,jobs}`、`retryable,error,attempts,completion_receipt`。排空期间 `active_work` 描述正在处理的 dispatch、写入和异步 job；等待时继续用同一 operation ID 查状态，不新增并行维护操作。
+
+只有持久状态为 `completed`，且 `completion_receipt.business_receipt_persisted=true`、`health_verified=true`、`handshake_verified=true`、`old_instance.instance_id != new_instance.instance_id`、新实例服务版本与 handshake 一致时才报告完成。该完成状态是在同一隔离书库上核对旧实例退出、新实例健康、握手和维护请求原业务回执之后写入的。
+
+失败是 `get_service_restart` 成功查询返回的 `data.status:"failed"`，查看 `error.code/message`、`retryable` 和残留 `active_work`。常见错误 `drain_timeout` 表示排空期限内还有在途请求或已入列工作；scheduler 已恢复接收写入。`helper_start_failed`、`old_instance_exit_timeout`、`restart_verification_failed` 或 `request_receipt_missing` 也保留失败原因。若 `retryable=true` 且用户仍明确要求完成此重启，调用 `retry_service_restart`，用原 `operation_id` 和新的唯一 `request_id`；随后继续查 `get_service_restart`。重试不可用会返回 `invalid_state`；未知 operation ID 为 `not_found`；重复 operation ID 为 `operation_id_conflict`；已有其他维护操作时为 `maintenance_in_progress`。服务没有本机实例上下文时为 `restart_unavailable`，未认证 host 为 `forbidden`。不要在失败状态外重试，也不要因超时另外创建新的 operation ID。
+
+## 审计轨迹
+
+每次写操作保留 request ID、目标 ID、前后版本、`committed` 状态和查回方式。批量动作记录整批是否提交/回滚及逐项结果。结果正文只采用真实回执；计划、预览和执行建议不是写入证明。
+
+本文件不替代实际工具目录或本机操作员授权。规格 17 的 CLI 不由外部 host 执行，规格 19 的 baseline 必须完整，规格 20 的 restart 必须在用户明确指示后发起。其余工具和字段按当前宿主注册 schema 执行。

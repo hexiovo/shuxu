@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f2f4f7">
+  <title>书序</title>
+  <link rel="icon" href="./favicon.ico?v=2">
+  <link rel="stylesheet" href="./app.css">
+  <script src="./materials.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="application">
+    <aside class="navigation" aria-label="书序导航">
+      <a class="brand-mark" href="#prompts" aria-label="书序">
+        <img class="shuxu-icon" src="./shuxu-icon.png" width="32" height="32" alt="">
+      </a>
+      <nav class="navigation-list">
+        <a class="navigation-link" href="#prompts" data-route="prompts" aria-label="出题" title="出题">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h8.5L16 7v9.5H4z"></path><path d="M12.5 3.5V7H16M7 10h6M7 13h6"></path></svg>
+          <span>出题</span>
+        </a>
+        <a class="navigation-link" href="#records" data-route="records" aria-label="记录" title="记录">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4.5h12M4 10h12M4 15.5h12"></path><circle cx="2.5" cy="4.5" r=".5"></circle><circle cx="2.5" cy="10" r=".5"></circle><circle cx="2.5" cy="15.5" r=".5"></circle></svg>
+          <span>记录</span>
+        </a>
+        <a class="navigation-link" href="#inspirations" data-route="inspirations" aria-label="灵感" title="灵感 · Alt+I">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12l2 8v4H2v-4zM3 11.5h4l1.5 2h3l1.5-2h4"></path></svg>
+          <span>灵感</span>
+        </a>
+        <a class="navigation-link" href="#clippings" data-route="clippings" aria-label="剪藏" title="剪藏">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3h10v14l-5-3-5 3zM8 7h4M8 10h4"></path></svg>
+          <span>剪藏</span>
+        </a>
+        <a class="navigation-link" href="#resume" data-route="resume" aria-label="续接" title="续接">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 9a6 6 0 1 1 2 5M4 5v4h4m2-3v4l2.5 1.5"></path></svg>
+          <span>续接</span>
+        </a>
+        <a class="navigation-link" href="#preferences" data-route="preferences" aria-label="偏好" title="偏好">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12M4 10h12M4 15h12"></path><circle cx="8" cy="5" r="1.8"></circle><circle cx="13" cy="10" r="1.8"></circle><circle cx="7" cy="15" r="1.8"></circle></svg>
+          <span>偏好</span>
+        </a>
+      </nav>
+    </aside>
+
+    <main class="workspace">
+      <header class="page-header">
+        <div>
+          <h1 id="page-title">命题</h1>
+          <p id="page-description">按需取题，按你的判断记录写作状态</p>
+        </div>
+        <span class="local-indicator"><span class="local-dot"></span>书序 · 本机</span>
+      </header>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div id="page-content"></div>
+    </main>
+  </div>
+
+  <button id="status-launch" class="status-launch" type="button" aria-expanded="false">
+    <span class="status-light" aria-hidden="true"></span>
+    <span>运行状态</span>
+  </button>
+  <section id="status-panel" class="status-panel" aria-label="运行状态" hidden>
+    <header class="status-header">
+      <div class="status-heading">
+        <img class="shuxu-icon" src="./shuxu-icon.png" width="32" height="32" alt="">
+        <div>
+          <h2>运行状态</h2>
+          <p id="status-updated">等待读取</p>
+        </div>
+      </div>
+      <div class="status-header-actions">
+        <button id="status-refresh" class="icon-button" type="button" aria-label="刷新运行状态" title="刷新">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 9a6 6 0 0 0-10.8-3L3.5 8"></path><path d="M3.5 4.8V8h3.2M4 11a6 6 0 0 0 10.8 3l1.7-2"></path><path d="M16.5 15.2V12h-3.2"></path></svg>
+        </button>
+        <button id="status-collapse" class="icon-button" type="button" aria-label="收起运行状态" title="收起">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 12 5-5 5 5"></path></svg>
+        </button>
+      </div>
+    </header>
+    <div class="status-controls">
+      <label for="status-default">默认显示</label>
+      <select id="status-default" aria-label="运行状态面板默认状态">
+        <option value="collapsed">收起</option>
+        <option value="expanded">展开</option>
+      </select>
+      <span>右键面板可隐藏</span>
+    </div>
+    <dl class="status-facts">
+      <div><dt>本机服务</dt><dd id="status-service">读取中</dd></div>
+      <div><dt>数据库</dt><dd id="status-database">读取中</dd></div>
+      <div><dt>MCP 最近调用</dt><dd id="status-mcp">—</dd></div>
+      <div><dt>启动时间</dt><dd id="status-started">—</dd></div>
+    </dl>
+    <div class="log-section">
+      <h3>近期诊断</h3>
+      <ul id="status-logs" class="status-logs"><li class="log-empty">读取中</li></ul>
+    </div>
+    <p id="status-error" class="status-error" role="status" aria-live="polite" hidden></p>
+    <p class="status-hint">此面板只显示状态与脱敏诊断信息</p>
+  </section>
+</body>
+</html>
+

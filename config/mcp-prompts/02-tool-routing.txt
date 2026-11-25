@@ -1,0 +1,143 @@
+书序 MCP 宿主指令 02｜意图识别与工具路由
+
+开始调用前先使用当前宿主真实可见的工具目录。按用户表达的目标选工具，并遵守当前注册 `inputSchema` 的必填字段、类型、枚举和范围。工具没列出、参数合同不明或权限不足时，说明具体缺口；不通过猜测字段、换身份或改连接方式绕过。
+
+## 批次 I、II：规格 01–16 及 18
+
+下列编号是《书序 MCP 下一版产品规格》的能力编号。实际工具名和完整参数以当前注册目录及宿主指南生成的 schema 附录为准；不得把示例参数当成真实 schema。
+
+### 01｜全权限宿主入口
+
+用户希望把书序作为统一入口时，先读取本宿主真实的 MCP `tools/list` 与 `get_mcp_directory`。后者返回 `identity{host_id,profile,authorization_revision}`、`full_access`、`capabilities`、`categories`、分页后的 `tools`、`total_count/count/offset/complete/next_offset`。工具条目带精确 `inputSchema`、`category`、`read_only`、`destructive`、`idempotent`、`receipt`。只有 `full_access=true` 并且所需工具实际可见时，才按它的 schema 执行完整内容能力；否则只用本 host 可见工具。HTTP handshake 只证明协议/服务/实例/目录摘要和目录本身，不含 host_id、profile 或 full_access。标准 stdio 与具名远端宿主不可互相代替；普通具名权限不能靠提示词升级。
+
+### 18｜完整读取、全文、原图与导出
+
+用户指定一题、专题、资料或范围时，以精确 ID 或检索结果定位；按实际分页/分段合同连续读取，保留同一快照和原返回游标。明确汇报总数、当前范围、是否取全和无法取得的部分。附件只读用户任务涉及的附件，记录类型、字节数、SHA-256 和实际分段位置；不猜路径，不把本机路径说成下载链接。
+
+### 02｜把自然语言整理成可执行计划
+
+用户表达多步目标或指代时，使用当前 `plan_mcp_calls`。场景路径按 `scenario` + `arguments_by_tool` 提供；结构化单目标路径使用 `intent`（`get_prompt|set_prompt_state|snooze_prompt`），并按需要传 `prompt_id`、`conversation_id`、`reference`、`keywords`、`state`、`time_text`、`timezone`、`expected_version`。完整范围和类型以当前 schema 为准。结果只列 `resolved`、`calls[{tool,arguments,precondition,depends_on,callable_now}]`、`dependencies`、`candidate_evidence`、`time_resolution`、`missing_fields`、`needs_clarification` 和 `writes_performed=false`；计划不执行调用。时间不完整、DST 跳过/重复时刻或目标歧义，按返回的 `question` 只补问必须的选择。权限不够、缺字段或版本冲突时先解释/重新读取，不把计划 JSON 直接当作工具参数提交。
+
+### 03｜跨天续接同一条思路
+
+用户要求接着以前的思路时，先定位明确保存的续接记录和关联题。候选多条时呈现可区分信息并让用户选择。恢复后保持原题关联，沿实际返回的未答问题和下一步建议继续；不把本轮推测伪装成旧线索。新增的保存/续接字段只按已注册 schema 填写。
+
+保存检查点只在用户明确要求保留当前进度时调用 `save_thought_checkpoint`。其必填参数为 `request_id`、`conversation_id`、`prompt_id`、`expected_version`、`cue`、`unanswered_question`、`progress`、`guide_step`；前三个 ID 为非空 1–200 字符，`expected_version>=1`，三段文字分别非空且最多 500 字符，`guide_step` 为 0–3。保存成功返回检查点 ID、题目和题目版本、来源会话、线索/未答问题/进度、步骤及时间。版本冲突时先读题，不用旧版本重试。
+
+恢复时可按 `checkpoint_id` 或题目、来源会话、日期窗、关键词和方向/主题筛选；全部查询字段均按 `continue_thought` 的当前 schema。若用户只说“接着上次”，传稳定的当前 `conversation_id`，让服务先按当前宿主默认范围查已保存检查点：恰有一条时恢复；多条返回候选让用户选；没有检查点才回退旧续接卡查询。`created_after`/`created_before` 必须是带时区的 date-time，`history_scope` 只取 `same_host` 或 `all_hosts`，`limit` 为 1–50。若返回多条，按 `candidate_count`、`candidates` 和 `has_more` 补问一项，不默认选最新；无匹配返回 `not_found`。结果包含保存时的 `checkpoint.prompt`、当前可见 `current_prompt`、是否题目版本/正文有变化、恢复状态、来源与当前会话关系、其它已存检查点和 `next_calls`。只有恢复状态可继续时，才按 `next_calls` 调 `guide_thought`，沿用 `resume_checkpoint_id`，等用户回答后传新 `request_id` 和一句本轮明确给出的线索。日期范围倒置、空白搜索词或把旧卡 `card_id` 与检查点检索字段混传时，按 `invalid_params` 停止并依据 details 修正。
+
+跨宿主查询 `all_hosts` 只可由本机目录明确显示的全权限宿主执行；普通宿主不得尝试提权。保存检查点含用户线索，用户未指定的私密材料不要写进 `cue`、`progress` 或 `unanswered_question`。
+
+### 04｜没有候选时给出放宽方案
+
+取题返回 `no_candidate` 时，解释实际生效的硬条件、过滤依据和各项真实试算结果。只提出服务实际返回的新调用参数；不自行放宽用户设置，也不在用户未选定方案前按放宽条件重新取题。若没有准确的单项试算，不编造候选数量。
+
+`next_prompt` 的输入 schema 未变。未传 `avoid_days` 时当前默认值为 7 天；实际生效条件会返回在 `effective_conditions`。错误中检查 `cause`、`candidate_count`、`intersection_exists` 和 `filter_stages`；过滤阶段的字段为 `filter`、`before`、`excluded`、`after`。`relaxations` 仅是分别移除一项当前生效条件后的单项试算，可能包括 `direction`、`topic`、`depth`、`time_depth`、`excluded_directions`、`recent`；每项注明 `candidate_count` 和 `remaining_conditions`。只推荐候选数大于零且位于服务 `next_calls` 的参数。用户选定后才按该调用参数重试，并补一个新的 `request_id`；不得串联多项放宽或自动忽略剩余约束。
+
+### 10｜按原回执更正刚才的操作
+
+先用当前宿主可用的请求状态/回执查询定位原动作和目标。当前注册工具 `correct_prompt_status` 必填 `request_id`、`conversation_id`；可选 `source_conversation_id`、`target_request_id`、`prompt_id`、`state`（`want_to_write|in_progress|written`）、`snoozed_until`（带时区 `date-time` 或 `null`）和 `reason`（1–240 字符），并至少提供 `state` 或 `snoozed_until`。不要传 schema 不存在的 `expected_version`。成功带 `original_receipt`、`before/after`、`correction_receipt`、`undo_available`、`next_call`；按下一调用 `get_prompt` 查回。未能唯一定位回执时展示 `needs_clarification`；不属于会话/权限范围时按 `not_found` 处理；回执已撤销或目标后来改变时停止在 `version_conflict` 并读取实际当前值。只有 `correction_receipt.committed=true` 才报告提交成功。具名普通权限不能更正私密题；当前 full actor 才可按其范围处理。
+
+## 批次 II 路由目标（规格 05–09、11–16）
+
+本节固定用户意图与处理边界。每次调用仍必须先确认当前宿主目录实际列出相应工具；工具名、参数、成功结构、错误码和查回路径以本指南当前注册 schema 及实现行为为准。目录缺少所需工具或本节与注册合同尚未对齐时，说明不可用，不猜字段、不回退到语义不同的旧工具，也不把下列目标描述当成部署证明。
+
+### 05｜沿用当前会话条件
+
+用户说“换个”或“收窄一点”时，读取本会话已有条件并沿用；优先级按单次明确条件、当前会话条件、现有偏好处理。明确的一次性覆盖只影响当前调用；只有用户明确要求时才保存、替换或结束会话条件。说明字段来源、当前有效值、到期/清除方式和实际冲突；不要把一个会话的条件带进另一会话。
+
+实际工具为 `get_session_conditions`、`set_session_conditions`、`end_session_conditions`。写入前通过 get 读取版本；set 用 `request_id,conversation_id,expected_version,conditions`，可选未来 `expires_at`；end 用相同会话和当前版本，可选指定 `fields`，省略则结束全部。`next_prompt` 返回 `condition_sources,inherited_fields,conflicts`；单次覆盖不会修改会话保存值。版本冲突重读，不用旧版本提交。
+
+`next_prompt` 本轮明确参数会逐字段覆盖会话值；若用户明确要求忽略某个已保存条件，才传 `ignore_session_fields` 中对应字段名（`direction,topic,depth,minutes,exclude_directions,avoid_days`）。不要把省略字段解释成用户清除条件，也不要在未获指令时替用户结束保存条件。
+
+### 06｜识别题族与近似题
+
+用户说两题相似或要换角度时，区分已确认的题族关系和自动近似命中。自动近似只能作为带理由的候选证据，不能自动保存为关系或长期屏蔽题目；遇到题族拆分、确认关系或只在本轮避让时，按用户选定的操作走对应能力。结果应让用户能区分原题、变体、近似项、关系来源、写作状态和筛除依据。
+
+先用 `get_prompt_family` 按精确 `prompt_id` 读取确认关系和 `similar_candidates`。用户明确确认后，才用 `set_prompt_family_relation`，按当前 schema 传双方 ID、`same_family|separate`、关系 `expected_version` 和可选理由。成功按 `get_prompt_family` 查回；本轮排除只传 `next_prompt.exclude_family_ids`，不写关系。
+
+### 07｜从未完成题中续写
+
+用户要找没想完的题时，按本轮明确的时间、方向和近期活动，检查可继续的写作状态、已到期暂缓和已保存续接点。尚未到期的暂缓题不得作为当前可续候选。给推荐题、状态、最近活动、已有续接点、条件与选择依据；只有实际接口支持时才展示完整候选及排序。候选为空时说明当前范围和数量，不把新题伪装成续接题。
+
+需要直接选一题时调用 `pick_unfinished_prompt`：必填 `request_id,conversation_id`，可带当前 schema 中的方向、主题、深浅、时长、排除方向、避重天数、已确认排除题族和 `limit`。它会记录一次选择，结果含 `prompt,decision_id,decision,alternatives,alternative_count,has_more`。不要用 picker 翻页。
+
+用户先要查看全部可续候选时，调用只读 `list_unfinished_prompts`：必填 `conversation_id`；可选相同条件、`limit`（默认 20，1–50）和 `offset`（默认 0，0–10,000）。返回 `items,total,offset,next_offset,complete,snapshot_at,effective_conditions,eligible_before_recent_count,recently_excluded_count,new_prompt_count,future_snoozed_count,rank_basis,explanation`；空池为 `ok`、空 `items` 和 `complete=true`，不是错误，也不写新的 recommendation history。每项含题目、位置、状态、最近活动、续接点和 `rank_reason`。续页只增加 `offset=next_offset`、保留其它参数；若题目状态在分页期间变化，重新从 0 读取。picker 空池才返回 `no_candidate`，按错误 details 和真实 `next_call` 给用户选择，不用新题冒充续接。
+
+### 08｜按明确意图改变追问方式
+
+用户要求经历、对照、反例、边界、证据或收窄等问法时，只按明确指令选择方式，沿同一题和实际已保存进度继续。每轮只返回一个追问；线索只取本轮获准的最小内容。切换问法不能切断原题关系，也不能把本轮回答默认保存成长期笔记。要求完整引导历史时按本宿主目录和授权读取。
+
+`guide_thought` 的 `question_mode` 枚举为 `experience|contrast|counterexample|boundary|evidence|narrow`。结果含 question、question_mode、实际采用的偏好依据、相关历史和 next_call。完整查看用 `get_guide_history` 按至少一个 conversation_id 或 prompt_id 分页；只返回服务保存的线索/问题记录，不包含用户回答。`history_scope=all_hosts` 只供 full actor。
+
+### 09｜维护长期与近期问法偏好
+
+用户明确提出“以后”或“近期”偏好时，先确认影响范围、方向、强度与期限，再按当前 schema 读写。报告原值、新值、当前有效值、版本、理由和截止时间；近期到期后按实际查询结果说明恢复值。不同方向或默认方向的应用效果必须引用真实选题依据，不把偏好权重说成保证命中。
+
+通过 `get_question_preferences` 读当前全局版本与有效项，再用 `set_question_preference` 写，或 `end_question_preference` 结束近期覆盖。长期 `baseline` 不带 `expires_at`；近期 `recent` 必须给未来到期时刻。`strength` 为 0–2，方向省略表示默认范围；expected_version 使用全局 preference version。若六种方式都为 0，`guide_thought` 会澄清，不自行选方式。
+
+### 11｜读取命题状态时间线
+
+回答“何时开始/哪次暂缓”等问题时，使用真实已提交事件，保留实际事件排序、提交时间、状态前后值、请求号、版本、理由、来源和关联续接记录。报告最早可追溯时间和证据缺口；缺失历史不能推断成“没有发生”。仅把实际读到的事件用于解释当前状态。
+
+当前工具 `get_prompt_timeline` 必填 `prompt_ids`（1–20 个、不可重复）；可选带时区 ISO date-time 的 `from`（包含）与 `through`（不包含）、`event_types`（`created|state_changed|snoozed|snooze_cleared|corrected|undone`）、`page_size`（默认 20，1–50）和 `offset`（默认 0）。成功返回 `events,total,page_size,offset,next_offset,coverage,sort`；事件有 `before/after` 版本、状态和暂缓时间、来源、续接卡引用与下一调用。`from` 必须早于 `through`；重复 ID、无效时间窗为 `invalid_params`，不存在或不可见题目为 `not_found`。翻页只传上一页的 `next_offset` 和原筛选。具体字段以注册 schema 为准。
+
+事件的可选 `reason` 只回显真实写入时提供的理由；旧事件或没提供时为 `null`，不能推断。来源中的请求/会话 ID 仅同一 host、profile 和授权修订可见；不要用空引用推测操作者或来源。
+
+### 12｜按发生时间统计与比较
+
+用户询问某段时间写完几题或比较区间时，先明确实际发生日期范围、时区、事件类别和统计口径。区分区间内完成事件、当前仍为完成态和完成后重新打开；逐条明细须能按回执中的公式与分母重算汇总。注明覆盖范围、无法还原的历史区间，并提供真实记录的下钻路径。
+
+当前工具 `review_prompt_events` 必填 `periods`（1–2 个区间，每项必填 `from_date` 和 `through_date`，可选 `label`）及 IANA `timezone`；可选 `direction`、`topic`、六种 `event_types`、`page_size`（默认 20，1–50）和非负 `offset`。成功返回 `periods,comparison,event_types,filters`；每个区间包含本地日期和 UTC 边界、`coverage`、`counts`、`formula`、分页 `records` 与 `next_offset`。完成数依据真实完成事件；当前仍写完与区间发生过事件的题数是不同口径。日期/时区错误返回 `invalid_params`，主题不存在返回 `not_found`。明细的 `next_call` 可下钻 `get_prompt_timeline`；按当前响应公式重算，不自行解释统计口径。
+
+### 13｜用多条点名资料拟题
+
+只有用户明确选定并授权的资料才可参与。按用户指定顺序、字段或精确片段拟一条草题，逐条保留资料 ID、使用范围、来源/日期和可回查引用，并说明对照、承接或反例的关系及查重结果。拟题是草稿；除非用户明确要求保存，不写入题库或关系表。
+
+工具为只读 `draft_prompt_from_materials`；至少两条选定素材、每条明确 kind/id/selection。保存时须用户另行明确要求，并单独调用写入工具。
+
+### 14｜保存题目与资料的关系
+
+用户明确指定题目、资料、关系角色、顺序和说明后，按实际写入工具和当前版本提交。写入后读取回执中的关系 ID、双方对象、角色、说明、顺序、时间与版本；再用实际正向和反向读取路径核对。角色不明确、目标或版本冲突时先澄清/重读，不依相似度自行创建关系。
+
+写入用 `save_prompt_material_relations`，需要现有题及其版本或新题对象、关系类型与有序材料；移除用 `remove_prompt_material_relation` 并传关系版本；正/反向分页查回用 `read_entity_relations`。
+
+### 15｜记录说法的证据范围
+
+把用户给出的具体说法与指定来源片段逐条关联，并按实际合同记录支持、反对、间接或待核对类型、页码/段落、引用、核对时间和用户录入结论。关联来源只说明有出处，不自动证明说法为真。写入后逐条查回说法、来源位置、证据类型、版本与仍缺资料；对没有足够片段的结论明确标出待核对。
+
+写入 `write_claim_evidence` 必须用当前题版本及每条剪藏版本；只读取用 `read_prompt_evidence`，分页查回每条 claim 和证据。只有原文位置、引用、support_type 和版本均来自回执时才据此概述。
+
+### 16｜整理专题进度与下一线索
+
+用户要求专题全貌时，组合当前可读的成员、引用、命题状态、续接点和证据关系；按指定或实际稳定排序给出完整范围与缺项。每条下一线索都要指向已存实体，并附产生依据与可执行的当前目录调用。若专题成员、事件或证据没有落盘，不把推测补成专题事实。
+
+完整专题视图使用 `get_topic_project_progress`；先核验 `full_access=true`，传精确 `project_id` 并按 `limit/offset` 取完 `members`。同时阅读 `gaps` 与 `next_clue`，按其 `basis` 和 `next_call` 查回建议所指实体。
+
+## 既有路由与其他能力
+
+`get_workflow_guide` 的 `01`–`20` 是当前既有路由场景 ID，不等同于产品规格的 20 项编号。旧路由 ID 与每项 `tools` 列表保持原样；新能力在产品规格映射中单独列出，不自动成为旧 `plan_mcp_calls` 场景的必调步骤。需要其他场景时读取 `get_workflow_guide` 的当前完整结果，再按目录实际可用工具调用。
+
+已有路由的稳定规则：
+- 「刚才那题」先 `resolve_reference`；历史另选题再 `bind_current_prompt`。
+- 「继续上次」按 `continue_thought` 定位续接卡，用户选定后再按授权读取。
+- 多项写入只用 `apply_actions` 支持的白名单动作；`use_current_prompt` 引用当前题，`prompt_from_step` 仅引用前序步骤创建的题。
+- 撤销用 `undo_action`，指定原 request ID；版本被后续修改时接受冲突结果。
+- 逐步追问用 `guide_thought`，首轮 `mode=start`，用户回答后再 `mode=continue`，每轮一个问题。
+- 取题按本轮时间、深浅和避让条件调用 `next_prompt`；临时条件不写成长久偏好。
+- 素材拟题先用搜索精确定位；没有用户明确保存指令时，只返回草题，不写入。
+- 备份恢复先预览并展示实际指纹、影响和本机安全备份信息；只有收到用户明确确认后才按原预览提交。
+
+### 17｜运行本机隔离宿主验收
+
+这是本机 CLI，不是 MCP 工具。只有用户明确要求在本机实现上做隔离验收时，才从项目根目录选择一个新的唯一 RUN_ID，运行 `py -3.12 -X utf8 -B -m shuxu.mcp25_host_acceptance --run-id "choose-a-new-unique-id" --output "$env:TEMP\shuxu-host-acceptance.json"`。它自建临时数据库与回环服务；不连接真实 CuteDuck、QQ 或正式 host。用退出码、JSON `status`、`checks` 和 `cleanup.service_stopped/workspace_removed` 核实；失败报告中的 `failure` 仅用于定位，不能改写成通过。
+
+### 19｜比较已保存目录和迁移影响
+
+用户要求比较升级前后工具目录时，使用 `compare_mcp_directories`。`baseline` 必须是完整 catalog 快照，或同一 host/profile 的完整未筛选 `get_mcp_directory` 快照；目录超过一页时拼接相同 `directory_id/identity` 的全部页，确保 `offset=0,complete=true,total_count=tools.length=capabilities.tool_count`。不得传片段、部分工具数组或不同快照混合。按 `counts` 判断差异总数，逐页处理 `changes`；仅在 `permission.comparable=true` 时解释 gaining/lost scope。没有旧具名目录身份时，权限差异为 unknown。迁移字段只含 schema 默认值和必填字段提示，先核对 `currently_callable`；不生成对象 ID，不自行调用 write。快照缺失/重复工具项目按 `invalid_baseline` 修复输入，不完整目录按 `baseline_incomplete` 重取；未授权为 `forbidden`。
+
+### 20｜用户明确授权后安全重启
+
+仅在用户明确要求现在重启服务时使用本 host 目录中真实可见的维护工具。`restart_service` 传新 `request_id` 和唯一 `operation_id`，`timeout_seconds` 可省略（默认 120，范围 1–3600）；它返回 `data.status="accepted"` 和查询工具 `get_service_restart`，只表示请求受理。随后用 `get_service_restart({"operation_id":"<原 operation_id>"})` 查询，逐步报告 `accepted/draining/stopping/starting/verifying`，并核对 `active_work` 的活动写入与任务。只有状态 `completed`、`completion_receipt.business_receipt_persisted/health_verified/handshake_verified=true`、新旧实例 ID 不同且服务版本匹配时，才能报告重启完成。状态为 `failed` 时先读取 `error,retryable,active_work`；只有 `retryable=true` 才能在原 `operation_id` 上调用 `retry_service_restart`，并使用新 `request_id`。超时不创建第二个维护操作；继续用原 operation ID 查询。
+
+规格 17 的 runner 结果不能代替用户侧客户端自验；19 只比较工具/目录合同，不确认进程已重启；20 只按持久状态与完成回执确认。所有分页、附件、写入与查回参数必须从当前工具 schema 和最近一次结果复制。

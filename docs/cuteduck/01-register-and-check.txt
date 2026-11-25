@@ -1,0 +1,49 @@
+# CuteDuck：书序 MCP 隔离注册与自检
+
+把这份说明交给 CuteDuck。用户会在客户端支持的标准 stdio MCP 注册位置手动添加测试项；不要猜测 CuteDuck 的菜单名称，不要自行改写正式配置、打开网页或启动 HTTPS Gateway。客户端若不接受标准 mcpServers/env 格式，请停止并说明它实际支持的字段或文档入口。
+
+## 只新增这个隔离项
+
+按书序现有示例的结构，只把下面这项合并到 mcpServers；保留配置中的所有其他服务器。它使用独立的测试数据库和运行目录，正式库不会被这项注册使用。
+
+~~~json
+{
+  "mcpServers": {
+    "shuxu-cuteduck-test": {
+      "command": "py",
+      "args": [
+        "-3.12",
+        "-X",
+        "utf8",
+        "-B",
+        "F:\\桌面\\程序\\shuxu\\shuxu\\mcp_server.py"
+      ],
+      "env": {
+        "SHUXU_PORT": "17833",
+        "SHUXU_DATA_DIR": "F:\\桌面\\程序\\shuxu\\.acceptance\\cuteduck-20261125-01a20bc6\\data",
+        "SHUXU_RUNTIME_DIR": "F:\\桌面\\程序\\shuxu\\.acceptance\\cuteduck-20261125-01a20bc6\\runtime"
+      }
+    }
+  }
+}
+~~~
+
+运行前确认上面这两个隔离目录尚不存在。若已存在，给它们换成同一个新的唯一后缀，并在 02 文件中同步更换 conversation_id 和 request_id。不要把 SHUXU_DATA_DIR 指向 I:\\data\\shuxu\\data，也不要与正式的 shuxu MCP 项合并成同一条。
+
+书序 1.4.0 的 MCP 会由 CuteDuck 的 stdio 子进程按需启动本机回环服务，不要求打开网页。启动的进程必须在握手中实际报告 1.4.0；若仍是旧实例或工具目录不一致，记录实际值并停止本轮验收。不要运行项目的 start.cmd 或直接启动 Gateway。服务使用 SHUXU_DATA_DIR 下的 shuxu.sqlite3。入口和变量依据：
+- F:\\桌面\\程序\\shuxu\\config\\mcp-registration.example.json
+- F:\\桌面\\程序\\shuxu\\docs\\start-stop-connect.md
+- F:\\桌面\\程序\\shuxu\\docs\\mcp24-host-guide.md
+
+CuteDuck 的注册和刷新界面没有在书序文档中说明；由用户按客户端当前真实文档完成注册及重新连接。不要猜按钮、目录、刷新命令或凭据。若客户端不支持传递 env，停止，不退回正式库或远端 Gateway。
+
+## 连接后的只读检查
+
+用户确认已连接 shuxu-cuteduck-test 后：
+
+1. 当前项目注册附录预期包含 120 个 MCP 工具；规格 17 是本机 CLI runner，不出现在 `tools/list`。`tools/list` 应与这份附录的当前生成版本一致。再调用 `get_mcp_directory({"limit":100,"offset":0})`：本机 `legacy_stdio` 的 `total_count` 应与 `tools/list` 相符，若 `complete=false`，按 `next_offset` 续页。核对 `identity.host_id/profile`、`full_access=true`、`capabilities` 和 `directory_version="1.4.0"`。至少核对以下本批工具在实际列表中：`get_full_record`、`list_full_records`、`get_attachment_chunk`、`export_full_library`、`get_full_export_info`、`read_full_export_chunk`、`plan_mcp_calls`、`save_thought_checkpoint`、`continue_thought`、`guide_thought`、`next_prompt`、`correct_prompt_status`、`get_session_conditions`、`set_session_conditions`、`end_session_conditions`、`get_prompt_family`、`set_prompt_family_relation`、`pick_unfinished_prompt`、`list_unfinished_prompts`、`get_guide_history`、`set_question_preference`、`get_question_preferences`、`end_question_preference`、`get_prompt_timeline`、`review_prompt_events`、`draft_prompt_from_materials`、`save_prompt_material_relations`、`remove_prompt_material_relation`、`read_entity_relations`、`write_claim_evidence`、`read_prompt_evidence`、`get_topic_project_progress`、`compare_mcp_directories`、`restart_service`、`get_service_restart`、`retry_service_restart`；以及 `diagnose_mcp_compatibility`、`run_mcp_self_check`、`get_prompt`。目录实际值优先于仓库预期；若服务版本、工具数、schema、权限字段或工具名不同，记录实际值并报告差异，不能把缺工具说成通过。
+2. 以 `expected_protocol_version=1`、`expected_service_version="1.4.0"` 调用 `diagnose_mcp_compatibility`。记录返回的协议及服务版本、`compatible`、`checks`、实例 ID、目录 ID 和授权修订。
+3. 调用 `run_mcp_self_check({})`。只有 `passed=true`、`checks` 中每项 `ok=true`、`synthetic_only=true`、`writes_performed=false` 才通过。该自检只检查合成向量，不证明 QQ 私聊已实际调用工具。
+
+若工具未出现、协议版本不符、py 启动失败、17833 端口冲突、服务不可用或自检失败，记录失败阶段和错误类别后停止。只通过同一测试项的客户端实际文档刷新/重连；不猜配置入口、不切到正式书库、不启动网页，也不另开网桥。不要把本机自检或旧 MCP 结果报告成 CuteDuck/QQ 实聊通过。
+

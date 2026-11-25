@@ -1,0 +1,239 @@
+# CuteDuck：同一 QQ 私聊四步验收
+
+本指令只用于书序 MCP 的隔离测试库。先完成 01 文件的隔离注册及自检；在 CuteDuck 的同一个 QQ 私聊里逐轮发送下面四句话。四轮都必须调用 shuxu-cuteduck-test 的真实 MCP 工具。不要选择正式 shuxu 项，不要读取正式题目或咨询资料，不要把自检结果当作实聊结果。
+
+## 本次会话标识
+
+基础四轮使用同一个 conversation_id：
+
+cuteduck-20261125-01a20bc6
+
+第 1–3 步各使用下列唯一 request_id；第 4 步 get_prompt 的 schema 只有 prompt_id 与可选 include_private，不传 request_id。写调用超时后，只能用原 request_id 和原参数查状态，不能换新编号重复写。重新做一轮时，同时更换 01 中的隔离目录后缀、conversation_id 和三个 request_id。
+
+- 第 1 步：cuteduck-20261125-01a20bc6-next
+- 第 2 步：cuteduck-20261125-01a20bc6-guide
+- 第 3 步：cuteduck-20261125-01a20bc6-written
+
+## 同一私聊中的四轮
+
+### 1. 取一题
+
+发送：“给我一题。”
+
+只调用 next_prompt：
+- conversation_id：上面的固定值
+- request_id：第 1 步编号
+
+记录 data.prompt.id 作为本轮唯一 prompt_id，记录 data.prompt.version 作为 version_before，并记录 data.decision_id。next_prompt 返回的 prompt 视图不含 state，不能据此判断题目状态；只核对 status=ok、prompt_id、version、decision_id 均有效，并确认这是 01 指定的新隔离库的首次调用。若没有题、缺少上述字段或无法确认隔离测试项，停止，不要转用正式库。
+
+### 2. 卡住时追问
+
+发送：“这题我卡住了，请针对刚才同一道题给我一个循序渐进的追问。”
+
+只调用 guide_thought，参数为：
+- conversation_id：同一个固定值
+- request_id：第 2 步编号
+- prompt_id：第 1 步返回的同一个 ID
+- mode：start
+
+记录回执。必须满足 data.prompt_id 与第 1 步 ID 相同、data.step=1 且 data.question 非空。这个操作会在隔离库记录追问进度；用户给的线索不保存为笔记。
+
+### 3. 标记写过
+
+发送：“我已写完这题，请把刚才同一道题标记为写过。”
+
+只调用 set_prompt_state，参数为：
+- request_id：第 3 步编号
+- prompt_id：第 1 步返回的同一个 ID
+- state：written
+- expected_version：第 1 步的 version_before
+
+必须确认 status=ok、data.request_id 与第 3 步编号相同、data.id 与 prompt_id 相同、data.state=written、data.version 大于 version_before，并且 envelope.receipt.committed=true。若发生 version_conflict，或提交状态未知，停止；未知时只用 get_request_status 查询原 request_id，不得换号重写。
+
+### 4. 查回状态
+
+发送：“请查回刚才同一道题的当前状态。”
+
+只调用 get_prompt，参数只传第 1 步返回的 prompt_id；不要设置 include_private=true。必须确认 status=ok、data.prompt.id 与 prompt_id 相同、data.prompt.state=written，且 data.prompt.version 与第 3 步返回的版本相同。
+
+## 通过标准与回执
+
+全部通过须同时满足：四轮发生在同一个 QQ 私聊；四步都是 shuxu-cuteduck-test 的真实工具调用；四步的 prompt_id 完全相同；第 2 步返回有效追问；第 3 步明确 committed 且版本递增；第 4 步查回 written 和相同的新版本。写入仅发生在 01 指定的隔离书库。
+
+按实际结果填写，不省略失败：
+
+- 结果：PASS / STOPPED_AT_STEP_1 / STOPPED_AT_STEP_2 / STOPPED_AT_STEP_3 / STOPPED_AT_STEP_4
+- MCP 项：shuxu-cuteduck-test
+- 协议/服务版本：
+- conversation_id：
+- prompt_id：
+- version_before：
+- 追问回执：step / question 非空 / prompt_id 一致
+- 写入回执：request_id / committed / state / version_after
+- 查回回执：prompt_id / state / version
+- 若失败：步骤、工具、错误类别；仅在该工具支持时记录原始 request_id（get_prompt 不接受 request_id）；不要贴凭据、登录信息或无关私聊内容
+
+任何一步不是明确成功都停在该步；不得自动补建题目、猜测题目、改用正式库或宣称验收通过。
+
+## 第一批能力核对（仅限同一隔离 MCP 项）
+
+基础四轮通过后，用户可以继续进行这些批次核对。所有读取、写入和导出仍只作用于 01 文件里的隔离书库；每个新写工具用唯一 request_id。仅当实际 `get_mcp_directory` 显示 `full_access=true` 且列出工具时，才核对规格 18 的完整读取。
+
+### 规格 01：确认身份与目录
+
+调用 `get_mcp_directory`，参数 `{"limit":100,"offset":0}`。检查 `identity.host_id/profile/authorization_revision`、`directory_version="1.4.0"`、`full_access=true`、`capabilities.all_tools=true`、`categories`、`tools`、`total_count/count/complete`。分页时只用返回的 `next_offset`。它必须与 `tools/list` 中的实际目录相符；不能用服务源码工具数量代替客户端实测。
+
+### 规格 02：验证只读计划
+
+用户说：“请先计划查一下我刚才这题的状态，不要修改。”调用 `plan_mcp_calls`：
+
+```json
+{"intent":"get_prompt","prompt_id":"<第1步prompt_id>","conversation_id":"cuteduck-20261125-01a20bc6"}
+```
+
+确认结果解析到同一 prompt，`calls` 指向 `get_prompt`，包含当前版本 `precondition`、`callable_now=true`，且 `writes_performed=false`。规划器不会执行 `get_prompt`；用户仍要查状态时再按返回参数单独调用并核对结果。
+
+### 规格 03：保存并跨轮恢复检查点
+
+只用以下合成验收句：“我现在停在比较两个解释的步骤，还没找到能区分它们的证据。”在同一隔离题目上，调用 `save_thought_checkpoint`，给唯一 request_id、当前 `conversation_id`、prompt_id、当前读取到的 `expected_version`、用户刚说的内容分别填入 `cue`、`unanswered_question`、`progress`，`guide_step` 取 1。不要复制真实私聊或正式资料。
+
+确认 `committed=true`，保存回执含 `checkpoint_id`、`prompt_id`、`prompt_version` 和完整 checkpoint。随后用新的 request_id 调 `continue_thought`，传本会话 `conversation_id`、该 `prompt_id`、`history_scope:"same_host"`；唯一命中后确认 `resume_status`、原/当前题目、会话关系和 `next_calls`。只有 `resume_status="ready"` 时按返回的 `guide_thought` 参数续接，再确认题目 ID 与步骤；如果返回多条，按实际候选停止并记录澄清，不自动选择。
+
+### 规格 04：检查无候选诊断
+
+用户说：“给我一题，但这轮先排除所有方向，只检查原因，不要替我放宽。”用唯一 request_id 调 `next_prompt`，参数为本会话 `conversation_id` 和完整 `exclude_directions:["self_exploration","consultation_reflection","social_topics"]`。若本隔离题库没有其他结构异常，预期是 `status:"no_candidate"`；核对真实 `effective_conditions`、`filter_stages`、单项 `relaxations` 和 `next_calls`。本轮不执行任何放宽参数；候选计数、过滤顺序或无 `next_call` 的项都必须逐字以回执为准。若实际不是 `no_candidate`，如实记回执并停止此项，不用更改条件重试。
+
+### 规格 10：更正本轮已提交状态并查回
+
+基础第 3 步已提交写作状态。用户说：“把刚才写过的题改成写到一半。”调用 `correct_prompt_status`，传新的 `request_id`、本会话 `conversation_id`、第 3 步的 `target_request_id`、同一 `prompt_id` 和 `state:"in_progress"`；可加合成 `reason:"隔离验收更正"`；不要提供 `expected_version`。核对 `original_receipt`、`before/after`、`correction_receipt.committed=true`、`undo_available` 和 `next_call`。按返回的 `get_prompt` 参数查回；状态应为 `in_progress`，题目版本应与更正回执一致。若回执歧义或冲突则停止，不换原 request ID 重做。
+
+### 规格 18：完整读取与隔离导出
+
+在 full access 已确认后，调用 `get_full_record({"kind":"prompt","id":"<本次prompt_id>"})`；确认含完整 `record` 及其来源/关联字段。再调用 `list_full_records({"kind":"prompt","page_size":1})`，核对总数、范围、快照和 `complete/next_cursor`；若有 cursor，只把该值单独传回 `list_full_records`，遇游标失效则从原查询重读。
+
+用户要求范围导出并确认只导出本题后，调用 `export_full_library`，用新的 request_id 和 `kind:"prompt"`、当前 `prompt_id`。确认 `committed=true`、`export_id`、计数、大小、SHA-256、有效期；再用 `get_full_export_info` 查回同一引用，并用 `read_full_export_chunk` 从 `offset:0` 分段读到 `eof=true`，校验每块 hash 与整文件 SHA-256。不要将内容或文件路径发送到 QQ。`get_attachment_chunk` 仅在隔离库已有由测试明确生成的带图灵感时核对；没有附件时记录“无可测附件”，不得拿真实聊天图片代替。
+
+## 第一批核对记录
+
+记录服务实际版本、注册工具数量与 directory ID、隔离路径后缀、六项各自调用的工具名、实际参数字段、状态/错误码、回执 ID、commit 与查回结果。只有真实调用和真实结构化回执通过的项目才标 PASS；被权限/目录挡住的项目记 `NOT_VERIFIED`。全量读取/导出报告已读计数、游标快照、文件大小和 SHA-256；不记录凭据、真实私聊正文或正式书库内容。
+
+## 第二批验收：规格 05–09、11–16
+
+下面是可执行的合成验收步骤，目标是检查实际注册合同和查回链；本文件本身不代表这些步骤已在 CuteDuck/QQ 运行。先确认本次是独立 stdio 项、实际列出相关工具且 `full_access=true`。所有 ID、文本、日期和素材都必须来自这份新隔离库；不可拿正式题目或真实私聊补齐测试数据。每个写调用使用新的 request_id。返回错误时按实际 `error.code/details` 停在相应步骤。
+
+### 05–07：会话条件、题族与未完成候选
+
+使用基础会话 ID 后缀 `-a`。先读取条件：
+
+```json
+{"conversation_id":"cuteduck-20261125-01a20bc6-a"}
+```
+
+检查 `version,conditions,sources,expired_fields,updated_at,precedence`。首次版本为 0。保存一项合成条件；`expected_version` 必须逐字取上一步结果：
+
+```json
+{"request_id":"cuteduck-20261125-01a20bc6-cond-1","conversation_id":"cuteduck-20261125-01a20bc6-a","expected_version":0,"conditions":{"depth":"light","exclude_directions":["social_topics"]}}
+```
+
+确认成功 `committed=true`，data 有新 `version,conditions,sources,expires_at`；再用同一 `conversation_id` 调 `get_session_conditions` 查回。使用新 request ID 和回执版本调用 `end_session_conditions`，传 `fields:["depth"]`；查回确认仅该字段结束。另用会话 ID 后缀 `-b` 读取，确认不会继承 A 的条件。版本冲突先重读，不覆盖。
+
+用 `list_unfinished_prompts` 读取可续候选，精确字段如下：
+
+```json
+{"conversation_id":"cuteduck-20261125-01a20bc6-a","depth":"light","limit":2,"offset":0}
+```
+
+可选条件还包括 `direction,topic,minutes,exclude_directions,avoid_days,exclude_family_ids`。检查 `items,total,offset,next_offset,complete,snapshot_at,effective_conditions,eligible_before_recent_count,recently_excluded_count,new_prompt_count,future_snoozed_count,rank_basis,explanation`，每项检查 `prompt,position,priority_rank,state,last_activity,checkpoint_id,continuation_point,rank_reason`。空候选应是 `ok`、`items:[]`、`total:0` 和 `complete:true`。若有下一页，原样保留所有过滤值，只把 `offset` 改成 `next_offset`；状态或活动变化时回到 offset 0 重读。这个工具无 request_id 且不写新推荐历史。
+
+只有列表中实际存在未完成候选时，才用 `pick_unfinished_prompt` 做一次推荐：传新 `request_id`、同一 `conversation_id` 和用户选定的过滤条件，不传 `offset`。核对 `prompt,decision_id,decision,alternatives,alternative_count,has_more`；用 `get_prompt({"prompt_id":"<data.prompt.id>"})` 查回题目。无候选时实际 picker 错误应为 `no_candidate`，记录 `candidate_count,eligible_before_recent_count,recently_excluded_count,new_prompt_count,future_snoozed_count,effective_conditions,explanation`；仅错误明确给出 `next_call` 且用户选择放宽时才重试。
+
+如隔离库已有两条合成命题，调用 `get_prompt_family({"prompt_id":"<synthetic-prompt-id>"})`，核对已确认的 `family_ids,confirmed_relations,separated_relations` 和未确认的 `similar_candidates`。近似项带 similarity、duplicate 和 reason，但不是已保存关系。用户选择确认关系后，使用新 request ID、双方命题 ID、`relation:"same_family"` 或 `"separate"`、当前关系 `expected_version`（新关系为 0）；按成功回执的 relation/version 再调用 `get_prompt_family` 查回。测试库没有第二条合成题时，记 `NOT_VERIFIED`，不要创建测试对象以外的内容。
+
+### 08–09：问法偏好与引导历史
+
+基础四轮中的题可继续用于测试。先以新 request ID 调 `guide_thought`：
+
+```json
+{"request_id":"cuteduck-20261125-01a20bc6-guide-2","conversation_id":"cuteduck-20261125-01a20bc6","prompt_id":"<第1步prompt_id>","mode":"continue","question_mode":"counterexample","focus":"哪条合成线索能推翻当前判断？"}
+```
+
+确认返回相同 `prompt_id`、一个非空 `question`、`step` 和 `question_mode`。用户回答不会被保存。用 `get_guide_history` 按同一 conversation 和 prompt 查询：
+
+```json
+{"conversation_id":"cuteduck-20261125-01a20bc6","prompt_id":"<第1步prompt_id>","history_scope":"same_host","limit":10,"offset":0}
+```
+
+核对 `items,total,offset,has_more`；每项只能包含已存的 ID、question_mode、focus、question、step 与时间，不含回答。
+
+先调用 `get_question_preferences({"include_history":true,"limit":20})`，读取 data 的 `version,items,effective,history`。近期偏好必须给出未来 `expires_at`；按刚读到的全局 version 写入：
+
+```json
+{"request_id":"cuteduck-20261125-01a20bc6-pref-1","expected_version":<上一步data.version>,"mode":"counterexample","scope":"recent","strength":1,"expires_at":"2030-01-01T00:00:00+08:00","reason":"隔离验收的合成偏好"}
+```
+
+成功应有 `committed=true,version,before,after`；再用 get 查回 `effective` 和版本。结束近期项时用新 request ID、最新版本和 `mode:"counterexample"` 调 `end_question_preference`，确认 `ended,before,after,version`。baseline 不接受 `expires_at`；recent 缺少或使用已过期时间应 `invalid_params`。版本冲突重读后再决定。
+
+### 11–12：时间线和区间统计
+
+基础四轮第 3 步及更正步骤产生真实隔离事件。调用：
+
+```json
+{"prompt_ids":["<第1步prompt_id>"],"page_size":20,"offset":0}
+```
+
+核对 `events,total,page_size,offset,next_offset,coverage,sort`。如果更正调用提供了合成 `reason`，对应事件应回显该理由；未提供或旧事件为 `null`，不得补猜。查看 `coverage` 的可追溯起点和缺口；历史账本启用前的状态不能推回。
+
+根据实际事件时间和隔离 host 的本地日期填两个不重叠区间，不复制示例日期。示例形状：
+
+```json
+{"periods":[{"label":"测试前段","from_date":"<本地开始日期>","through_date":"<本地结束日期>"},{"label":"测试后段","from_date":"<下一段开始日期>","through_date":"<下一段结束日期>"}],"timezone":"Asia/Shanghai","event_types":["corrected","state_changed"],"page_size":20,"offset":0}
+```
+
+`from_date/through_date` 都是本地日期且均包含；确认服务返回 UTC 边界、`coverage,counts,formula,records,total,page_size,offset,next_offset`，并按 formula 核对计数。按明细 `next_call` 用 `get_prompt_timeline` 下钻；当前仍 written 的题数不能冒充区间完成数。无效日期/时区是 `invalid_params`，未知主题为 `not_found`。
+
+### 13–16：拟题、关系、证据和专题
+
+先在隔离库准备两条合成素材，记录当前 ID、版本和用户明确选择的片段；不读取真实素材。调用只读拟题：
+
+```json
+{"relation_type":"comparison","materials":[{"kind":"inspiration","id":"<合成灵感ID>","selection":"excerpt","field":"text","start":0,"length":20,"expected_version":1},{"kind":"clipping","id":"<合成剪藏ID>","selection":"link_title","expected_version":1}],"direction":"self_exploration","depth":"medium"}
+```
+
+`expected_version` 使用实际素材版本，不默认假定为 1。核对返回的 `prompt,relation_type,materials,deduplication,save_parameters`；确认草题尚未保存，材料顺序、正文范围、来源日期/出处及查重候选均可核对。少于两条、重复对象或片段范围无效应是实际 `invalid_params`，权限/版本错误按回执停止。
+
+只有用户明确要求保存后，使用返回的 `save_parameters.arguments`，补新的 `request_id`。该参数包含新题 `prompt`、`relation_type` 和有序 `materials`；每项材料必须使用当前 `expected_version,selection,role,position`，`excerpt` 才包含 `field,start,length`，不要给 `full` 或 `link_title` 补 null 范围。成功核对 `prompt_id,prompt_created,relations,before_version,version,committed,changed,next_call`。按 `next_call` 调 `read_entity_relations` 查题目端，再按每个素材 ID 分别查反向关系；读取字段为 `items,total,next_offset`。移除测试关系时传当前 relation ID/version 和新 request ID，确认 `removed=true`，再双端查回。
+
+用已保存题和剪藏当前版本测试 `write_claim_evidence`：`request_id,prompt_id,expected_prompt_version,claims` 必填。claim 的 `text` 写合成说法；证据项传 `clipping_id,material_version,support_type`，支持/反对/间接项须同时提供实际 `location,excerpt`，可附 `field,conclusion`。确认成功 `committed=true`、题目版本、逐项 ID/版本/`checked_at`，以及 `verification:"recorded_scope_not_independent_fact_check"`。再调 `read_prompt_evidence({"prompt_id":"<prompt_id>","limit":50,"offset":0})`，逐条比对 `claims,total,next_offset` 及其 `items`。旧 claim-source 只显示 unverified，不补造原文。版本/范围错误为 `version_conflict/not_found/forbidden`，隐私拒绝时停止。
+
+如需验证专题进度，先用当前已注册的 `save_topic_project` schema 在隔离库保存只含上述合成题/材料的专题，再用返回的 project ID 调 `get_topic_project_progress({"project_id":"<project_id>","limit":50,"offset":0})`。仅 `full_access=true` 可执行；核对 `project,members,gaps,next_clue,total,next_offset`，续页只使用 offset。按 `next_clue.basis/next_call` 查回建议实体。没有合成专题时记 `NOT_VERIFIED`，不能调用正式专题替代。
+
+## 第三批验收：规格 17、19–20
+
+规格 17 是本机 CLI runner，不是 CuteDuck 工具，不放在此聊天步骤内。若用户要求本机实现验收，按 `docs/mcp24-host-guide.md` 运行并核对完整 JSON 与清理结果；它不能代替下方的真实 CuteDuck/QQ 客户端验收。
+
+### 19：同一宿主目录前后比较
+
+本步骤只验证只读目录比较。先用 `get_mcp_directory({"limit":100,"offset":0})` 取得完整快照。如果 `complete=false`，按 `next_offset` 再读后续页；确认页间 `directory_id,identity,directory_version` 相同后，将所有 `tools` 按 offset 拼接，保留首屏 `identity,capabilities,directory_id,directory_version,directory_schema_version`，整理成 `offset:0,complete:true,total_count:tools.length=capabilities.tool_count` 的一个 `baseline` 对象。不要只传第一页或把不同运行的目录混在一起。
+
+用完整 `baseline` 调 `compare_mcp_directories`，传 `limit:100,offset:0`。立即对比同一快照时应得到 `compatible:true`、`changes:[]`、`counts.total:0` 和同一 host/profile 下 `permission_delta.comparable:true`；以真实响应为准。若仅拿到第一页面，可额外核对它返回 `status/error.code=baseline_incomplete`，随后改用完整 snapshot。若权限不足为 `forbidden`，记 `NOT_VERIFIED`，不改 scope。
+
+核对 `baseline,current,version_changes,permission_delta,counts,changes,offset,limit,complete,next_offset`。若使用的是升级前保存的目录而不是当前快照，记录每项 schema 的变化路径/影响和 `migration` 的缺失必填项；仅在 `permission_delta.comparable=true` 时报告权限增减。若为 catalog 快照，权限差异未知。目录比较本身不能证明实例重启或工具已在本 client 可调用。
+
+### 20：只在隔离实例中验收重启
+
+完成其他写入并确认当前无正在提交的请求/job 后，且仅当当前 host 是上文的独立测试实例，才进行此步骤。用新的唯一 request ID 和 operation ID 调 `restart_service`，不传正式数据路径：
+
+```json
+{"request_id":"cuteduck-20261125-01a20bc6-restart-1","operation_id":"cuteduck-20261125-01a20bc6-restart-op-1"}
+```
+
+核对首回执 `data.status:"accepted"`、`query_tool:"get_service_restart"` 和 `retry_with_same_operation_id:true`；这不等于重启完成。使用原 operation ID 读取 `get_service_restart`，轮询实际持久状态 `accepted/draining/stopping/starting/verifying/completed/failed`。排空过程中记录 `active_work:{active_dispatches,active_writes,active_actions,jobs}`，不要发起并行写入或第二个重启请求。
+
+只有查回 `data.status:"completed"`、`completion_receipt.business_receipt_persisted/health_verified/handshake_verified` 全为 true、新旧 `instance_id` 不同且新旧 service version 与握手一致，才记录 `PASS`。若返回 `data.status:"failed"`，记录其中 `error.code/message,retryable,active_work`，不要把外层 `status:"ok"` 误读成重启成功。`drain_timeout`、`helper_start_failed`、`old_instance_exit_timeout`、`restart_verification_failed`、`request_receipt_missing` 都是失败状态；只有用户仍要求重启且同一操作 `retryable=true` 时，才用原 operation ID 和另一个新 request ID 调 `retry_service_restart`。`invalid_state`、`operation_id_conflict` 或 `maintenance_in_progress` 时停止并记录；不另建 ID 绕过。
+
+没有当前维护工具、host scope 不足、客户端无法在同一 stdio 会话内查询新实例或隔离路径未确认时，记 `NOT_VERIFIED`/`STOPPED`，不得改用日常数据库。规格 17 的本机 CLI runner 是另一项独立验收，不能代替本 CuteDuck 实际对话；runner 本身也不连 CuteDuck/QQ。
+
+所有验收步骤都记录实际结构化回执：状态、工具名、脱敏的合成 ID、request ID、commit、错误码、版本、下一调用和查回结果。没有实际回执的步骤填 `NOT_VERIFIED` 或 `STOPPED`，不能由模型口述补成 PASS。真实 CuteDuck/QQ 私聊仍由用户自行验收并带回结果；本指令没有替用户注册、启动或发送消息。
+
+
+

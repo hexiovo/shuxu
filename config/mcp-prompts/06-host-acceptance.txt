@@ -1,0 +1,34 @@
+书序 MCP 宿主指令 06｜隔离宿主验收
+
+本指令只在用户明确要求进行验收、并已为本次验收提供独立书库与独立服务目录时使用。禁止使用日常 `data`、正式 host、正式服务实例或真实用户素材。隔离注册路径与唯一标识见当前验收说明；若隔离目录已存在，不复用其中状态，按说明换一个全新的后缀。
+
+## 连接前核对
+
+1. 验收项必须由 stdio 子进程直接启动，并显式设置专用端口、`SHUXU_DATA_DIR`、`SHUXU_RUNTIME_DIR`。不启动正式网页/Gateway，不共享正式数据库。
+2. 通过真实 MCP `tools/list` 记录服务/协议版本、实际工具总数和本宿主可见工具名。把它与当前生成的注册 schema 附录及本次 `get_mcp_directory` 结果对照；数量或字段不同，记录差异并停在此步骤。
+3. 仅在隔离实例中调用 `diagnose_mcp_compatibility` 和合成 `run_mcp_self_check`。逐字段记录结果；合成自检不能代替业务写入验证。
+4. 为每次验收生成新 conversation ID 和唯一 request ID。整个一轮验收只绑定隔离 host 与隔离数据目录。
+
+## 能力验收原则
+
+- 验收用户话语、工具名、传入参数和返回结构都必须可从当前 MCP 实际调用中核对；不接受宿主自己口述的模拟结果。
+- 读取能力核对业务总数、页/段位置、是否取全、版本与必要校验值；不接触用户正式内容。
+- 写入能力必须看到真实 `committed=true` 或该工具合同定义的提交凭据，再以返回 ID/version 查回同一隔离记录。
+- 失败时记录最后成功步骤、实际工具名、错误码和原 request ID。写入状态未知时只查原 request ID；不得另造编号重复提交。
+- 只验证已经在隔离宿主目录中出现、且当前服务版本实际注册的功能。未登记的能力、字段或预期返回值标为“待验收”，不得填成通过。
+
+## 本地隔离验收工具：产品规格 17
+
+仅在用户明确要求运行本机实现验收时，从项目根目录选择一个新且唯一的 RUN_ID，执行 `py -3.12 -X utf8 -B -m shuxu.mcp25_host_acceptance --run-id "choose-a-new-unique-id" --output "$env:TEMP\shuxu-host-acceptance.json"`。该 runner 自建临时数据库、runtime 目录和回环端口，直接检查 stdio MCP；它不连接外部宿主、CuteDuck 或 QQ。成功必须同时看到退出码 0、JSON `status="passed"` 和清理字段 `service_stopped=true,workspace_removed=true`。验收失败退出码 1；CLI/输出异常退出码 2。保留完整 JSON 报告，记录 `failure.phase,error_code,last_successful_step` 或成功 `checks`；不把本地 runner 结果写成真实客户端验收。
+
+完整报告应含本地 `host/tool_catalog/fixture/attachment/export/sqlite` 检查，以及真实 named loopback relay 的 `named_gateway`。核对 `named_gateway.named_full.full_access_write` 的 `tool,request_id,prompt_id,before_version,after_version,state,receipt,request_status,sqlite_receipt,sqlite_public_request_key_absent,sqlite_prompt,passed`。同一个公开 request ID 必须出现在 set 回执和 `get_request_status` 中且均为 committed；`steps` 的 named full `get_prompt` 与 `sqlite_prompt` 必须反映同一更高版本及状态。受限 reader 要显示只读摘要可用，完整 detail 被拒绝，未授权全文工具不可见或返回范围错误。缺任何查回证据都不能只看 `status="passed"` 作为 named write 通过。报告不含 bearer；不复制或记录凭据。
+
+## 用户侧客户端验收：规格 01–20
+
+本指南及六份宿主 TXT 收录产品规格 01–20。真实客户端由用户本人按 `docs/cuteduck/01-register-and-check.txt` 和 `docs/cuteduck/02-acceptance-chat.txt` 操作；助手不得代开客户端、发消息或宣称已接通。验收前核对真实握手、目录版本、工具数、工具名、inputSchema、身份与能力。完整读取、原图和完整专题要求 `full_access=true`；重启按受理、排空、启动、握手和查回回执分步验收；目录迁移以保存的完整旧快照和当前同一 host/profile 实际目录比较。缺工具或权限时记录“未验证/受限”，不借用其他身份继续。用户侧验收通过必须有真实客户端调用与返回记录；本机 runner、服务状态或代码注册都不能替代。
+
+## 验收报告
+
+记录服务版本、协议版本、注册目录摘要/数量、隔离数据目录后缀、会话标识、工具调用的实际 request ID、提交状态、查回 ID/version、完整读取的计数/校验值，以及每一步的实际错误或通过依据。
+
+本地 stdio 自检只证明本机实例的合成接口检查。真实 CuteDuck、QQ 或桌面宿宠运行必须由用户亲自在实际客户端执行并带回真实回执；不得打开客户端、发消息、配置真实账号或宣称已连接。
